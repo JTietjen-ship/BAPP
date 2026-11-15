@@ -8,68 +8,24 @@ from torch.utils.data import TensorDataset, DataLoader
 from scipy.stats import spearmanr
 
 
-#####################################
-####### 1: Data/Model Imports #######
-#####################################
+###############################
+####### 1: Data Imports #######
+###############################
 
-df = pd.read_csv("data/P53_HUMAN_Giacomelli_2018_Null_Nutlin.csv")
-df = df.dropna(subset=["mutated_sequence", "DMS_score"]).reset_index(drop=True)
-# print(df.head())
-sequences = df["mutated_sequence"].tolist()
-mutants = df["mutant"].tolist()
-y_scores = df["DMS_score"].values.astype(np.float32)
+df = pd.read_csv("data/p53_esm2_t6_8M_embeddings.csv")
+embed_cols = [col for col in df.columns if col.startswith("emb_")]
+X = df[embed_cols].to_numpy(dtype=np.float32)
+y_scores = df["DMS_score"].to_numpy(dtype=np.float32)
 
-# facebook/esm2_t12_35M_UR50D
-# facebook/esm2_t30_150M_UR50D
-# facebook/esm2_t33_650M_UR50D
-# facebook/esm2_t36_3B_UR50D
-model_name = "facebook/esm2_t6_8M_UR50D"
+##############################
+####### 2: Data Splits #######
+##############################
 
-# Detect Apple Silicon GPU (MPS) or fall back to CPU
+# Device setup for torch
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Running on device: {device}")
 
-
-#####################################
-####### 2: Extract Embeddings #######
-#####################################
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-esm_model = AutoModel.from_pretrained(model_name).to(device)
-esm_model.eval()
-
-batch_size_esm = 16
-all_embeddings = []
-
-print("Extracting ESM-2 embeddings...")
-
-with torch.no_grad():
-    for start_idx in range(0, len(sequences), batch_size_esm):
-        batch_seqs = sequences[start_idx : start_idx + batch_size_esm]
-        inputs = tokenizer(batch_seqs, return_tensors="pt", padding=True).to(device)
-        outputs = esm_model(**inputs)
-        token_reps = outputs.last_hidden_state
-
-        for i, seq in enumerate(batch_seqs):
-            seq_len = len(seq)
-            # Average across amino acids (excluding <cls>, <eos>, and <pad>)
-            # shape: [hidden_dim], averages hidden dimensions (column-wise)
-            seq_rep = token_reps[i, 1 : seq_len + 1].mean(dim=0)
-            all_embeddings.append(seq_rep.cpu().numpy())
-
-X = np.vstack(all_embeddings).astype(np.float32)  # Shape: (N, 320)
-print(f"Extracted embeddings shape: {X.shape}")
-
-# Optional: Pair mutants with their embeddings or attach back to a subset DataFrame
-# subset_df = df.head(5).copy()
-# subset_df["esm2_embedding"] = sequence_embeddings
-# print(subset_df[["mutant", "DMS_score", "esm2_embedding"]])
-
-
-##############################
-####### 3: Data Splits #######
-##############################
-
+# Random Splits
 torch.manual_seed(42)
 indices = torch.randperm(len(X))
 split = int(0.8 * len(X))  # 80% train, 20% validation
