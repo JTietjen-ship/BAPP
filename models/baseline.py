@@ -14,6 +14,7 @@ from datetime import datetime
 ####################################
 
 RESULTS_CSV = "experiment_results.csv"
+HISTORY_CSV = "epoch_history.csv"
 
 # Experiment hyperparameters (logged to CSV)
 # options: random, position, amino_acid_type
@@ -25,6 +26,11 @@ weight_decay = 1e-2
 batch_size = 32
 epochs = 100
 seed = 42
+
+# Experiment identifiers
+run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+arch_str = "-".join(map(str, hidden_dims))
+config_label = f"{split_type} | arch={arch_str} | lr={lr} | do={dropout_rate}"
 
 
 ###############################
@@ -145,6 +151,7 @@ print(f"\nTraining DMS regressor | Split: {split_type} | Arch: {hidden_dims}..."
 best_val_mse = float("inf")
 best_val_spearman = -1.0
 best_epoch = 0
+epoch_records = []
 
 for epoch in range(1, epochs + 1):
     regressor.train()
@@ -178,19 +185,34 @@ for epoch in range(1, epochs + 1):
                     best_val_mse = val_mse
                     best_epoch = epoch
 
-        print(f"Epoch {epoch:02d}/{epochs} | Train MSE: {train_loss:.4f} | Val MSE: {val_mse:.4f} | Val Spearman: {rho:.4f}")
+        epoch_records.append({
+            "run_id": run_id,
+            "config_label": config_label,
+            "split_type": split_type,
+            "architecture": arch_str,
+            "lr": lr,
+            "dropout": dropout_rate,
+            "weight_decay": weight_decay,
+            "epoch": epoch,
+            "train_mse": round(train_loss, 4),
+            "val_mse": round(val_mse, 4),
+            "val_spearman": round(rho, 4),
+        })
 
+        print(f"Epoch {epoch:02d}/{epochs} | Train MSE: {train_loss:.4f} | Val MSE: {val_mse:.4f} | Val Spearman: {rho:.4f}")
 
 ################################
 ####### 5: Save Results ########
 ################################
 
+# 1. Save summary row
 run_record = pd.DataFrame([{
+    "run_id": run_id,
     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "dataset": os.path.basename(data_path),
     "split_type": split_type,
     "depth": len(hidden_dims),
-    "architecture": "-".join(map(str, hidden_dims)),
+    "architecture": arch_str,
     "dropout": dropout_rate,
     "lr": lr,
     "weight_decay": weight_decay,
@@ -202,7 +224,10 @@ run_record = pd.DataFrame([{
     "final_val_spearman": round(rho, 4),
     "final_val_mse": round(val_mse, 4),
 }])
+run_record.to_csv(RESULTS_CSV, mode="a", header=not os.path.exists(RESULTS_CSV), index=False)
 
-file_exists = os.path.exists(RESULTS_CSV)
-run_record.to_csv(RESULTS_CSV, mode="a", header=not file_exists, index=False)
-print(f"\nSaved experiment results to {RESULTS_CSV}")
+# 2. Save per-epoch learning curves
+history_df = pd.DataFrame(epoch_records)
+history_df.to_csv(HISTORY_CSV, mode="a", header=not os.path.exists(HISTORY_CSV), index=False)
+
+print(f"\nSaved summary to {RESULTS_CSV} and epoch history to {HISTORY_CSV}")
